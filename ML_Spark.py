@@ -1,6 +1,10 @@
 
 # coding: utf-8
 
+# # Découverte du package MLLIB 
+
+# ## Analyse explo (rapide) 
+
 # In[1]:
 
 #vérification du bon fonctionnement et du lancement du sc
@@ -16,7 +20,7 @@ from pandas import DataFrame
 from pyspark.mllib.stat import Statistics
 
 
-# In[34]:
+# In[2]:
 
 #chargement du fichier glass.csv
 nomF = "glass"
@@ -43,7 +47,7 @@ data = pd.DataFrame({'1-nom Fichier':[nomF],
 data
 
 
-# In[5]:
+# In[3]:
 
 #La variable à prédire est le type : col=9
 #nomColInit[9]
@@ -52,7 +56,7 @@ data
 # Répartition des classes de la variable à prédire
 
 # traitement sur la 9ème col
-typeV = parts.map(lambda line: line[9])
+typeV = parts.map(lambda line: line[8])
 # map + reduce
 distribType = typeV.map(lambda typeT: (typeT, 1)).reduceByKey(lambda a, b: a+b)
 i = 0
@@ -67,7 +71,7 @@ plt.axis('equal')
 plt.show()
 
 
-# In[27]:
+# In[4]:
 
 ##### En trichant #####
 # Utilisation de pandas pour résumer les données + afficher la matrice de corrélation
@@ -77,7 +81,7 @@ df.describe()
 # print(df.corr())
 
 
-# In[37]:
+# In[5]:
 
 # Utilisation du package mllib
 # Basics Statistics
@@ -93,26 +97,20 @@ Statistics.corr(partsNum, method="pearson")
 
 # ## Naive Bayes
 
-# In[3]:
+# In[6]:
 
 from pyspark.mllib.classification import NaiveBayes, NaiveBayesModel
-from pyspark.mllib.linalg import Vectors
-from pyspark.mllib.regression import LabeledPoint
 import utils_mesure
 import pandas as pd
 
-def parseLine(line):
-    parts = line.split(';')
-    label = float(parts[8])
-    features = Vectors.dense([float(x) for x in parts[0:8]])
-    return LabeledPoint(label, features)
+
 
 data = sc.textFile("file:/C:/spark-1.6.0-bin-hadoop2.4/glass_svm.csv")
 
 # suppression du header
 nomColInit = data.first()
 data2 = data.filter(lambda line: nomColInit != line) 
-data = data2.map(parseLine)
+data = data2.map(utils_mesure.parseLine)
 
 # Echantillonnage 60% entrainement et 40% test
 training, test = data.randomSplit([0.6, 0.4], seed=0)
@@ -124,49 +122,62 @@ predictionAndLabel = test.map(lambda p: (model.predict(p.features), p.label))
 
 # Calcul des indicateurs du modèle
 accuracy = 1.0 * predictionAndLabel.filter(lambda (x, v): x == v ).count() / test.count()
-pG = 0
-rG = 0
-i = 1
-while i < 7:
-    a = utils_mesure.matriceConf(predictionAndLabel, i)
-    pG = pG + utils_mesure.precision(a)
-    rG = rG + utils_mesure.rappel(a)
-    i += 1
-pG = pG /6
-rG = rG /6
-fM = utils_mesure.f_mesure(rG, pG)
 
-# Résumée des mesures du modèle
-data = pd.DataFrame({'1-Méthode':["NaiveBayes"],
-                    '2-Précision':[pG],
-                       '3-Rappel':[rG],
-                       '4-F_mesure': [fM]})
-data
+utils_mesure.tabSum(predictionAndLabel, 7, 'Naive Bayes')
 
 
 
-# # Classification non Supervisée
+# ## Decision Tree
 
-# ## Kmeans
+# In[7]:
 
-# In[207]:
-
-def parseLine(line):
-    parts = line.split(';')
-    features = array([float(x) for x in parts[0:9]])
-    return features
-def parseLine2(line):
-    parts = line.split(';')
-    features = array([float(x) for x in parts[0:8]])
-    return features
+from pyspark.mllib.tree import DecisionTree, DecisionTreeModel
 
 data = sc.textFile("file:/C:/spark-1.6.0-bin-hadoop2.4/glass_svm.csv")
 
 # suppression du header
 nomColInit = data.first()
 data2 = data.filter(lambda line: nomColInit != line) 
-data = data2.map(parseLine)
-dataTrain = data2.map(parseLine2)
+data = data2.map(utils_mesure.parseLine)
+
+# Echantillonnage 60% entrainement et 40% test
+training, test = data.randomSplit([0.6, 0.4], seed=0)
+# Construction du modèle
+model = DecisionTree.trainClassifier(training, numClasses=7, categoricalFeaturesInfo={},
+                                     impurity='entropy', maxDepth=10, maxBins=32)
+# Test 
+predictions = model.predict(test.map(lambda x: x.features))
+labelsAndPredictions = test.map(lambda lp: lp.label).zip(predictions)
+testErr = labelsAndPredictions.filter(lambda (v, p): v != p).count() / float(test.count())
+print('Test Error = ' + str(testErr))
+print('Learned classification tree model:')
+print(model.toDebugString())
+
+
+# In[8]:
+
+utils_mesure.tabSum(labelsAndPredictions, 7, 'Decision Tree')
+
+L'affichage de l'arbre de décision n'est pas très lisible, il serait intéressant d'écrire un module qui permette de faire de la visu. Avec un taux d'erreur à 38,88% le modèle n'est pas très fiable.
+# # Classification non Supervisée
+
+# ## Kmeans
+
+# In[10]:
+
+from pyspark.mllib.clustering import KMeans, KMeansModel
+from numpy import array
+from math import sqrt
+import numpy
+
+
+data = sc.textFile("file:/C:/spark-1.6.0-bin-hadoop2.4/glass_svm.csv")
+
+# suppression du header
+nomColInit = data.first()
+data2 = data.filter(lambda line: nomColInit != line) 
+data = data2.map(utils_mesure.parseLine2)
+dataTrain = data2.map(utils_mesure.parseLine3)
 # Construction du Kmeans
 clusters = KMeans.train(dataTrain, 6, maxIterations=10,
         runs=10, initializationMode="random")
@@ -178,7 +189,7 @@ WSSSE = dataTrain.map(lambda point: error(point)).reduce(lambda x, y: x + y)
 print("Within Set Sum of Squared Error = " + str(WSSSE))
 
 
-# In[219]:
+# In[11]:
 
 # Répartition des groupes
 gpKmeans = data.map(lambda p: (clusters.predict(p[0:8]),p[8]))
@@ -209,62 +220,30 @@ df = pd.DataFrame(l, index = ['gp1_P', 'gp2_P', 'gp3_P', 'gp4_P', 'gp5_P', 'gp6_
 df
 
 
-# ### Interprétation à finir
+# ### Interprétation (à finir)
 Avec Kmeans, 2 groupes se distinguent : 4 et 6
 Le groupe gp1_P regroupe 123 des individus et mélange nettement gp1_R / gp2_R / gp3_R
 # ## Gaussian Mixture 
 
-# In[200]:
+# In[12]:
 
-# Exemple Spark
 from pyspark.mllib.clustering import GaussianMixture
-from numpy import array
 
-# Load and parse the data
-data = sc.textFile("data/mllib/gmm_data.txt")
-parsedData = data.map(lambda line: array([float(x) for x in line.strip().split(' ')]))
+# Construction du model avc le mm dataTrain que Kmeans
+gmm = GaussianMixture.train(dataTrain, 6)
 
-# Build the model (cluster the data)
-gmm = GaussianMixture.train(parsedData, 2)
-
-# output parameters of model
+# sortie des parameters du modele
 for i in range(2):
     print ("weight = ", gmm.weights[i], "mu = ", gmm.gaussians[i].mu,
         "sigma = ", gmm.gaussians[i].sigma.toArray())
 
 
+# ### Interprétation (à finir)
+
 # # En cours
 # 
 
-# In[15]:
-
-from pyspark.mllib.classification import NaiveBayes, NaiveBayesModel
-from pyspark.mllib.linalg import Vectors
-from pyspark.mllib.regression import LabeledPoint
-import utils_mesure
-import pandas as pd
-def parseLine(line):
-    parts = line.split(';')
-    label = float(parts[8])
-    features = array([float(x) for x in parts[0:7]])
-    return features
-data = sc.textFile("file:/C:/spark-1.6.0-bin-hadoop2.4/glass_svm.csv")
-
-# suppression du header
-nomColInit = data.first()
-data2 = data.filter(lambda line: nomColInit != line) 
-data = data2.map(parseLine)
-clusters = KMeans.train(data, 6, maxIterations=10,
-        runs=10, initializationMode="random")
-def error(point):
-    center = clusters.centers[clusters.predict(point)]
-    return sqrt(sum([x**2 for x in (point - center)]))
-
-WSSSE = data.map(lambda point: error(point)).reduce(lambda x, y: x + y)
-print("Within Set Sum of Squared Error = " + str(WSSSE))
-
-
-# In[4]:
+# In[ ]:
 
 from pyspark.ml.classification import LogisticRegression
 
@@ -281,7 +260,7 @@ print("Coefficients: " + str(lrModel.coefficients))
 print("Intercept: " + str(lrModel.intercept))
 
 
-# In[2]:
+# In[ ]:
 
 from pyspark.ml import Pipeline
 from pyspark.ml.classification import GBTClassifier
@@ -326,7 +305,7 @@ gbtModel = model.stages[2]
 print(gbtModel)  # summary only
 
 
-# In[1]:
+# In[ ]:
 
 # Random Forest
 from pyspark.ml import Pipeline
@@ -372,7 +351,7 @@ rfModel = model.stages[2]
 print(rfModel)  # summary only
 
 
-# In[3]:
+# In[ ]:
 
 # Classification et regression 
 # Méthodes linéaires
@@ -405,7 +384,7 @@ parsedData = data2.map(parsePoint)
 #sameModel = SVMModel.load(sc, "myModelPath")
 
 
-# In[2]:
+# In[ ]:
 
 from pyspark.mllib.classification import LogisticRegressionWithLBFGS, LogisticRegressionModel
 from pyspark.mllib.regression import LabeledPoint
@@ -429,40 +408,4 @@ print("Training Error = " + str(trainErr))
 # Save and load model
 model.save(sc, "myModelPath2")
 sameModel = LogisticRegressionModel.load(sc, "myModelPath2")
-
-
-# In[4]:
-
-from pyspark.mllib.tree import DecisionTree, DecisionTreeModel
-from pyspark.mllib.util import MLUtils
-model2 = DecisionTree.trainClassifier(training, numClasses=6, categoricalFeaturesInfo={},
-                                     impurity='entropy', maxDepth=5, maxBins=32)
-
-
-# In[11]:
-
-from pyspark.mllib.tree import DecisionTree, DecisionTreeModel
-from pyspark.mllib.util import MLUtils
-
-# Load and parse the data file into an RDD of LabeledPoint.
-data = MLUtils.loadLibSVMFile(sc, 'data/mllib/sample_libsvm_data.txt')
-# Split the data into training and test sets (30% held out for testing)
-(trainingData, testData) = data.randomSplit([0.7, 0.3])
-
-# Train a DecisionTree model.
-#  Empty categoricalFeaturesInfo indicates all features are continuous.
-model = DecisionTree.trainClassifier(trainingData, numClasses=2, categoricalFeaturesInfo={},
-                                     impurity='gini', maxDepth=5, maxBins=32)
-
-# Evaluate model on test instances and compute test error
-predictions = model.predict(testData.map(lambda x: x.features))
-labelsAndPredictions = testData.map(lambda lp: lp.label).zip(predictions)
-testErr = labelsAndPredictions.filter(lambda (v, p): v != p).count() / float(testData.count())
-print('Test Error = ' + str(testErr))
-print('Learned classification tree model:')
-print(model.toDebugString())
-
-# Save and load model
-#model.save(sc, "target/tmp/myDecisionTreeClassificationModel")
-#sameModel = DecisionTreeModel.load(sc, "target/tmp/myDecisionTreeClassificationModel")
 
