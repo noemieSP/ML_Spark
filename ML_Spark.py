@@ -89,11 +89,11 @@ print(summary.numNonzeros())
 Statistics.corr(partsNum, method="pearson")
 
 
-# In[1]:
+# # Classification supervisée
 
-###############
-# Naive Bayes #
-###############
+# ## Naive Bayes
+
+# In[3]:
 
 from pyspark.mllib.classification import NaiveBayes, NaiveBayesModel
 from pyspark.mllib.linalg import Vectors
@@ -104,7 +104,7 @@ import pandas as pd
 def parseLine(line):
     parts = line.split(';')
     label = float(parts[8])
-    features = Vectors.dense([float(x) for x in parts[0:7]])
+    features = Vectors.dense([float(x) for x in parts[0:8]])
     return LabeledPoint(label, features)
 
 data = sc.textFile("file:/C:/spark-1.6.0-bin-hadoop2.4/glass_svm.csv")
@@ -145,10 +145,234 @@ data
 
 
 
-# ##### En cours #####
+# # Classification non Supervisée
+
+# ## Kmeans
+
+# In[207]:
+
+def parseLine(line):
+    parts = line.split(';')
+    features = array([float(x) for x in parts[0:9]])
+    return features
+def parseLine2(line):
+    parts = line.split(';')
+    features = array([float(x) for x in parts[0:8]])
+    return features
+
+data = sc.textFile("file:/C:/spark-1.6.0-bin-hadoop2.4/glass_svm.csv")
+
+# suppression du header
+nomColInit = data.first()
+data2 = data.filter(lambda line: nomColInit != line) 
+data = data2.map(parseLine)
+dataTrain = data2.map(parseLine2)
+# Construction du Kmeans
+clusters = KMeans.train(dataTrain, 6, maxIterations=10,
+        runs=10, initializationMode="random")
+def error(point):
+    center = clusters.centers[clusters.predict(point)]
+    return sqrt(sum([x**2 for x in (point - center)]))
+
+WSSSE = dataTrain.map(lambda point: error(point)).reduce(lambda x, y: x + y)
+print("Within Set Sum of Squared Error = " + str(WSSSE))
+
+
+# In[219]:
+
+# Répartition des groupes
+gpKmeans = data.map(lambda p: (clusters.predict(p[0:8]),p[8]))
+gpKmeansK = gpKmeans.map(lambda p: (str(p[0])+"_"+str(p[1]),1))
+gpKmeansK2 = gpKmeansK.reduceByKey(lambda a, b: a+b)
+listeR = gpKmeansK2.collect()
+# Construction du tableau CD
+# Découpage
+listeF = []
+i = 0
+maxN = len(listeR)
+while i < maxN:
+    listeR2 = listeR[i][0].split("_") + [str(listeR[i][1])]
+    listeF = listeF + [listeR2]
+    i += 1
+listeF
+# construction de la liste
+i = 0
+l = numpy.array([[0]*6]*6)
+while i < maxN:
+    a = int(listeF[i][0])
+    b = int(float(listeF[i][1])) -1
+    l[a][b] = int(listeF[i][2])
+    i += 1
+# Affichage 
+df = pd.DataFrame(l, index = ['gp1_P', 'gp2_P', 'gp3_P', 'gp4_P', 'gp5_P', 'gp6_P'],
+                  columns = ['gp1_R', 'gp2_R', 'gp3_R', 'gp4_R', 'gp5_R', 'gp6_R'])
+df
+
+
+# ### Interprétation à finir
+Avec Kmeans, 2 groupes se distinguent : 4 et 6
+Le groupe gp1_P regroupe 123 des individus et mélange nettement gp1_R / gp2_R / gp3_R
+# ## Gaussian Mixture 
+
+# In[200]:
+
+# Exemple Spark
+from pyspark.mllib.clustering import GaussianMixture
+from numpy import array
+
+# Load and parse the data
+data = sc.textFile("data/mllib/gmm_data.txt")
+parsedData = data.map(lambda line: array([float(x) for x in line.strip().split(' ')]))
+
+# Build the model (cluster the data)
+gmm = GaussianMixture.train(parsedData, 2)
+
+# output parameters of model
+for i in range(2):
+    print ("weight = ", gmm.weights[i], "mu = ", gmm.gaussians[i].mu,
+        "sigma = ", gmm.gaussians[i].sigma.toArray())
+
+
+# # En cours
 # 
 
+# In[15]:
+
+from pyspark.mllib.classification import NaiveBayes, NaiveBayesModel
+from pyspark.mllib.linalg import Vectors
+from pyspark.mllib.regression import LabeledPoint
+import utils_mesure
+import pandas as pd
+def parseLine(line):
+    parts = line.split(';')
+    label = float(parts[8])
+    features = array([float(x) for x in parts[0:7]])
+    return features
+data = sc.textFile("file:/C:/spark-1.6.0-bin-hadoop2.4/glass_svm.csv")
+
+# suppression du header
+nomColInit = data.first()
+data2 = data.filter(lambda line: nomColInit != line) 
+data = data2.map(parseLine)
+clusters = KMeans.train(data, 6, maxIterations=10,
+        runs=10, initializationMode="random")
+def error(point):
+    center = clusters.centers[clusters.predict(point)]
+    return sqrt(sum([x**2 for x in (point - center)]))
+
+WSSSE = data.map(lambda point: error(point)).reduce(lambda x, y: x + y)
+print("Within Set Sum of Squared Error = " + str(WSSSE))
+
+
+# In[4]:
+
+from pyspark.ml.classification import LogisticRegression
+
+# Load training data
+training = sqlContext.read.format("libsvm").load("data/mllib/sample_libsvm_data.txt")
+
+lr = LogisticRegression(maxIter=10, regParam=0.3, elasticNetParam=0.8)
+
+# Fit the model
+lrModel = lr.fit(training)
+
+# Print the coefficients and intercept for logistic regression
+print("Coefficients: " + str(lrModel.coefficients))
+print("Intercept: " + str(lrModel.intercept))
+
+
+# In[2]:
+
+from pyspark.ml import Pipeline
+from pyspark.ml.classification import GBTClassifier
+from pyspark.ml.feature import StringIndexer, VectorIndexer
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+
+# Load and parse the data file, converting it to a DataFrame.
+data = sqlContext.read.format("libsvm").load("data/mllib/sample_libsvm_data.txt")
+
+# Index labels, adding metadata to the label column.
+# Fit on whole dataset to include all labels in index.
+labelIndexer = StringIndexer(inputCol="label", outputCol="indexedLabel").fit(data)
+# Automatically identify categorical features, and index them.
+# Set maxCategories so features with > 4 distinct values are treated as continuous.
+featureIndexer =    VectorIndexer(inputCol="features", outputCol="indexedFeatures", maxCategories=4).fit(data)
+
+# Split the data into training and test sets (30% held out for testing)
+(trainingData, testData) = data.randomSplit([0.7, 0.3])
+
+# Train a GBT model.
+gbt = GBTClassifier(labelCol="indexedLabel", featuresCol="indexedFeatures", maxIter=10)
+
+# Chain indexers and GBT in a Pipeline
+pipeline = Pipeline(stages=[labelIndexer, featureIndexer, gbt])
+
+# Train model.  This also runs the indexers.
+model = pipeline.fit(trainingData)
+
+# Make predictions.
+predictions = model.transform(testData)
+
+# Select example rows to display.
+predictions.select("prediction", "indexedLabel", "features").show(5)
+
+# Select (prediction, true label) and compute test error
+evaluator = MulticlassClassificationEvaluator(
+    labelCol="indexedLabel", predictionCol="prediction", metricName="precision")
+accuracy = evaluator.evaluate(predictions)
+print("Test Error = %g" % (1.0 - accuracy))
+
+gbtModel = model.stages[2]
+print(gbtModel)  # summary only
+
+
 # In[1]:
+
+# Random Forest
+from pyspark.ml import Pipeline
+from pyspark.ml.classification import RandomForestClassifier
+from pyspark.ml.feature import StringIndexer, VectorIndexer
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+
+# Load and parse the data file, converting it to a DataFrame.
+data = sqlContext.read.format("libsvm").load("data/mllib/sample_libsvm_data.txt")
+
+# Index labels, adding metadata to the label column.
+# Fit on whole dataset to include all labels in index.
+labelIndexer = StringIndexer(inputCol="label", outputCol="indexedLabel").fit(data)
+# Automatically identify categorical features, and index them.
+# Set maxCategories so features with > 4 distinct values are treated as continuous.
+featureIndexer =    VectorIndexer(inputCol="features", outputCol="indexedFeatures", maxCategories=4).fit(data)
+
+# Split the data into training and test sets (30% held out for testing)
+(trainingData, testData) = data.randomSplit([0.7, 0.3])
+
+# Train a RandomForest model.
+rf = RandomForestClassifier(labelCol="indexedLabel", featuresCol="indexedFeatures")
+
+# Chain indexers and forest in a Pipeline
+pipeline = Pipeline(stages=[labelIndexer, featureIndexer, rf])
+
+# Train model.  This also runs the indexers.
+model = pipeline.fit(trainingData)
+
+# Make predictions.
+predictions = model.transform(testData)
+
+# Select example rows to display.
+predictions.select("prediction", "indexedLabel", "features").show(5)
+
+# Select (prediction, true label) and compute test error
+evaluator = MulticlassClassificationEvaluator(
+    labelCol="indexedLabel", predictionCol="prediction", metricName="precision")
+accuracy = evaluator.evaluate(predictions)
+print("Test Error = %g" % (1.0 - accuracy))
+
+rfModel = model.stages[2]
+print(rfModel)  # summary only
+
+
+# In[3]:
 
 # Classification et regression 
 # Méthodes linéaires
@@ -169,23 +393,16 @@ data2 = data.filter(lambda line: nomColInit != line)
 parsedData = data2.map(parsePoint)
 
 # Build the model
-model = SVMWithSGD.train(parsedData, iterations=100)
+#model = SVMWithSGD.train(parsedData, iterations=100)
 
 # Evaluating the model on training data
-labelsAndPreds = parsedData.map(lambda p: (p.label, model.predict(p.features)))
-trainErr = labelsAndPreds.filter(lambda (v, p): v != p).count() / float(parsedData.count())
-print("Training Error = " + str(trainErr))
+#labelsAndPreds = parsedData.map(lambda p: (p.label, model.predict(p.features)))
+#trainErr = labelsAndPreds.filter(lambda (v, p): v != p).count() / float(parsedData.count())
+#print("Training Error = " + str(trainErr))
 
 # Save and load model
 #model.save(sc, "myModelPath")
 #sameModel = SVMModel.load(sc, "myModelPath")
-
-
-# In[71]:
-
-from pyspark.mllib.classification import LogisticRegressionWithLBFGS, LogisticRegressionModel
-
-model = LogisticRegressionWithLBFGS.train(parsedData, numClasses=2)
 
 
 # In[2]:
