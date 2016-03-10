@@ -7,39 +7,34 @@
 
 # In[1]:
 
-#vérification du bon fonctionnement et du lancement du sc
-#import des packages nécessaires
-#sc
 import utils
 import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
 get_ipython().magic(u'matplotlib inline')
-import pandas as pd
 from pandas import DataFrame
-from pyspark.mllib.stat import Statistics
 
 
 # In[2]:
 
-#chargement du fichier glass.csv
+# chargement du fichier glass.csv
 nomF = "glass"
 dataGlass = sc.textFile("file:/C:/spark-1.6.0-bin-hadoop2.4/"+nomF+".csv")
-#séparation des colonnes
+# séparation des colonnes
 lines = dataGlass.map(lambda line: utils.toRow(line, ';'))
-#ligne 1 = header -> save header
+# ligne 1 = header -> save header
 nomColInit = lines.take(1)[0]
-#save nb col
+# save nb col
 nbColInit = len(nomColInit)
-#sruppression du header
+# sruppression du header
 parts = lines.filter(lambda line: nomColInit != line) 
 parts = parts.filter(lambda line: len(line) == nbColInit)
-#cptage nb lignes (sans le header)   
+# cptage nb lignes (sans le header)   
 nbLignesInit = parts.count()
-#cptage erreur : nb col header != nb col de la ligne 
+# cptage erreur : nb col header != nb col de la ligne 
 partsError = parts.filter(lambda line: len(line) != nbColInit)
 nbErrorL = partsError.count()
-#tableau résumé 
+# tableau résumé 
 data = pd.DataFrame({'1-nom Fichier':[nomF],
                        '2-nb Col':[nbColInit],
                        '3-nb Lignes': [nbLignesInit],
@@ -47,18 +42,19 @@ data = pd.DataFrame({'1-nom Fichier':[nomF],
 data
 
 
+# Le fichier a été correctement importé (0 ligne d'erreur). 
+# 
+# Il décrit la composition de 214 échantillon de verre, définie sur 8 variables numériques et une variable qualitative de typage de l'échantillon. 
+
+# ### Répartition des classes
+
 # In[3]:
 
-#La variable à prédire est le type : col=9
-#nomColInit[9]
-
-##################################################
-# Répartition des classes de la variable à prédire
-
-# traitement sur la 9ème col
+# La variable à prédire est le "type" 
 typeV = parts.map(lambda line: line[8])
 # map + reduce
 distribType = typeV.map(lambda typeT: (typeT, 1)).reduceByKey(lambda a, b: a+b)
+# Digramme de répartition
 i = 0
 name = []
 data = []
@@ -71,6 +67,8 @@ plt.axis('equal')
 plt.show()
 
 
+# Ce jeu de données ne nécessite pas de manipulation directe, il n’y a en effet aucune valeur manquante ni aucune erreur détectée. En revanche, nous constatons une inégalité dans la répartition des types : les building_windows représentent plus de 68% de la base. Nous pouvons déjà nous attendre à des difficultés d'obtenir un modèle prédictif fiable.
+
 # In[4]:
 
 ##### En trichant #####
@@ -81,9 +79,11 @@ df.describe()
 # print(df.corr())
 
 
+# ### Mllib Statistics
+
 # In[5]:
 
-# Utilisation du package mllib
+from pyspark.mllib.stat import Statistics
 # Basics Statistics
 partsNum = parts.map(lambda line: line[0:8])
 summary = Statistics.colStats(partsNum)
@@ -101,11 +101,8 @@ Statistics.corr(partsNum, method="pearson")
 
 from pyspark.mllib.classification import NaiveBayes, NaiveBayesModel
 import utils_mesure
-import pandas as pd
-
-
-
-data = sc.textFile("file:/C:/spark-1.6.0-bin-hadoop2.4/glass_svm.csv")
+nomF_svm = "glass_svm"
+data = sc.textFile("file:/C:/spark-1.6.0-bin-hadoop2.4/"+nomF_svm+".csv")
 
 # suppression du header
 nomColInit = data.first()
@@ -129,11 +126,11 @@ utils_mesure.tabSum(predictionAndLabel, 7, 'Naive Bayes')
 
 # ## Decision Tree
 
-# In[7]:
+# In[8]:
 
 from pyspark.mllib.tree import DecisionTree, DecisionTreeModel
-
-data = sc.textFile("file:/C:/spark-1.6.0-bin-hadoop2.4/glass_svm.csv")
+import utils_mesure
+data = sc.textFile("file:/C:/spark-1.6.0-bin-hadoop2.4/"+nomF_svm+".csv")
 
 # suppression du header
 nomColInit = data.first()
@@ -156,9 +153,26 @@ print(model.toDebugString())
 
 # In[8]:
 
+# Mesures globales du mmodèle
 utils_mesure.tabSum(labelsAndPredictions, 7, 'Decision Tree')
 
-L'affichage de l'arbre de décision n'est pas très lisible, il serait intéressant d'écrire un module qui permette de faire de la visu. Avec un taux d'erreur à 38,88% le modèle n'est pas très fiable.
+
+# L'affichage de l'arbre de décision n'est pas très lisible, il serait intéressant d'écrire un module qui permette de faire de la visu. Avec un taux d'erreur à 38,88% le modèle n'est pas très fiable.
+
+# ## Méthodes non utilisables
+
+# ### Gradient Boosted Tree
+
+# Note: GBTs do not yet support multiclass classification. For multiclass problems, please use decision trees or Random Forests.
+# 
+# Cette méthode n'est donc pas appliquable à notre jeu de données.
+
+# ### Survival regression
+
+# L'analyse de survie repose souvent sur des séries temporelles de données longitudinales.
+# 
+# Notre Data Set ne correspond pas à ce type de modèle
+
 # # Classification non Supervisée
 
 # ## Kmeans
@@ -171,7 +185,7 @@ from math import sqrt
 import numpy
 
 
-data = sc.textFile("file:/C:/spark-1.6.0-bin-hadoop2.4/glass_svm.csv")
+data = sc.textFile("file:/C:/spark-1.6.0-bin-hadoop2.4/"+nomF_svm+".csv")
 
 # suppression du header
 nomColInit = data.first()
@@ -240,8 +254,82 @@ for i in range(2):
 
 # ### Interprétation (à finir)
 
+# # Mesures d'évaluation (en cours)
+
+# In[30]:
+
+from pyspark.mllib.evaluation import MultilabelMetrics
+
+# Instantiate metrics object
+metrics = MultilabelMetrics(labelsAndPredictions)
+
+# Summary stats
+print("Recall = %s" % metrics.recall())
+print("Precision = %s" % metrics.precision())
+print("F1 measure = %s" % metrics.f1Measure())
+print("Accuracy = %s" % metrics.accuracy)
+
+
+# ("You must build Spark with Hive. Export 'SPARK_HIVE=true' and run build/sbt assembly", ...)
+
 # # En cours
 # 
+
+# In[1]:
+
+# PIC
+from __future__ import print_function
+from pyspark.mllib.clustering import PowerIterationClustering, PowerIterationClusteringModel
+
+# Load and parse the data
+data = sc.textFile("data/mllib/pic_data.txt")
+similarities = data.map(lambda line: tuple([float(x) for x in line.split(' ')]))
+
+# Cluster the data into two classes using PowerIterationClustering
+model = PowerIterationClustering.train(similarities, 2, 10)
+
+model.assignments().foreach(lambda x: print(str(x.id) + " -> " + str(x.cluster)))
+
+
+
+# In[2]:
+
+def printM(x):
+    return (str(x.id) + " -> " + str(x.cluster))
+    
+
+
+# In[3]:
+
+model.assignments().foreach(lambda x: printM(x))
+
+
+# In[12]:
+
+# Multilayer perceptron classifier
+from pyspark.ml.classification import MultilayerPerceptronClassifier
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+
+# Load training data
+data = sqlContext.read.format("libsvm")    .load("data/mllib/sample_multiclass_classification_data.txt")
+# Split the data into train and test
+splits = data.randomSplit([0.6, 0.4], 1234)
+train = splits[0]
+test = splits[1]
+# specify layers for the neural network:
+# input layer of size 4 (features), two intermediate of size 5 and 4
+# and output of size 3 (classes)
+layers = [4, 5, 4, 3]
+# create the trainer and set its parameters
+trainer = MultilayerPerceptronClassifier(maxIter=100, layers=layers, blockSize=128, seed=1234)
+# train the model
+model = trainer.fit(train)
+# compute precision on the test set
+result = model.transform(test)
+predictionAndLabels = result.select("prediction", "label")
+evaluator = MulticlassClassificationEvaluator(metricName="precision")
+print("Precision:" + str(evaluator.evaluate(predictionAndLabels)))
+
 
 # In[ ]:
 
@@ -305,7 +393,7 @@ gbtModel = model.stages[2]
 print(gbtModel)  # summary only
 
 
-# In[ ]:
+# In[13]:
 
 # Random Forest
 from pyspark.ml import Pipeline
